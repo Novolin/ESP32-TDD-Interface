@@ -1,6 +1,7 @@
 # VS Code stuff
 .vscode
-
+Blog
+datasheets
 # Prerequisites
 *.d
 
