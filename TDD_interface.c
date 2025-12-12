@@ -23,9 +23,6 @@ int TDD_mode = BD_NONE; // Active mode for transmission/reception
 int TDD_timeout = 0; 
 const int TDD_MAX_TIME = 600; // max # of seconds to wait for a TDD message to finish
 
-/*******************************************************
- * Function Defs, so I can write them whenever i want *
- */
 
 
 unsigned char sanitize_and_buffer(unsigned char input_string[]);
@@ -130,3 +127,4 @@ int main(){
     }
     return 0;
 }
+
