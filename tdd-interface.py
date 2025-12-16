@@ -2,6 +2,9 @@ from machine import Pin, I2S # type:ignore (micropython lib)
 from micropython import const #type:ignore 
 from collections import deque
 from bd_defs import *
+from math import sin, tau
+
+
 
 
 NOT_ENOUGH_DATA = -1
@@ -13,6 +16,15 @@ MIDPOINT = const(32768) # should be the middle point of a 16-bit audio packet???
 BITRATE = const(8000) # 8K is what telephones used, so that should be good enough for me?
 SAMPS_PER_BIT = const((BITRATE / 1000) * BIT_LENGTH)
 # remember: I2S uses little-endian data!! 
+
+# Sine tables for output:
+MARK_TABLE = bytearray()
+SPACE_TABLE = bytearray()
+for i in range(SAMPS_PER_BIT):
+    MARK_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * MARK_FREQ)))
+    SPACE_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * SPACE_FREQ)))
+
+
 
 class TDD_Interface:
     def __init__(self, rx_clock, rx_word_sel, rx_data, tx_clock, tx_word_sel, tx_data):
@@ -31,11 +43,10 @@ class TDD_Interface:
                              ibuf = BITRATE # 1 second should be more than enough for our output?
                              )
         self.in_audio_buff = bytearray()
-        self.out_audio_buff = bytearray()
         self.in_data_buff = deque((), 255)
         self.out_data_buff = deque((), 255)
         self.busy = False # are we busy decoding or encoding data? 
-
+        self.in_mode = LTRS
     def decode_audio_buffer(self) -> int:
         ''' Decodes the incoming audio buffer'''
         last_tone = -1 # no previous tone at this point.
@@ -43,7 +54,7 @@ class TDD_Interface:
         while True:
             if len(self.in_audio_buff) < 2:
                 return NOT_ENOUGH_DATA
-            sample = int.from_Bytes(self.in_audio_buff[0:2], 'little')
+            sample = int.from_bytes(self.in_audio_buff[0:2], 'little')
             if sample > NOISEFLOOR + MIDPOINT or sample < MIDPOINT - NOISEFLOOR:
                 break
             self.in_audio_buff = self.in_audio_buff[2:] # snip until we get good data
@@ -64,25 +75,51 @@ class TDD_Interface:
                 started_byte = True
                 bitcount = 0
                 buffbyte = 0
-                while started_byte:
-                        # rewrite our sampler but make it trim the ends!!!!!!
-                    if started_byte and next_tone == MARK_FREQ: # start bit acquired, we're getting the mark tone
+                while started_byte: # once we get our tone, we have to slice things a specific way
+                    if bitcount < 5 and next_tone == MARK_FREQ: # binary 1
                         buffbyte |= (1 << bitcount)
-                        bitcount += 1
-                    elif started_byte and bitcount < 5: # it's a space frequency, but we're not ready for a stop bit
+                    elif bitcount < 5 and next_tone == SPACE_FREQ: # it's a space frequency, but we're not ready for a stop bit
                         buffbyte |= (0 << bitcount)
-                        bitcount += 1
-                    elif started_byte and bitcount == 5 and next_tone == SPACE_FREQ:
-                        bitcount += 1
-                        last_tone = MARK_FREQ # ensure we treat a borderline as a space, since it probably will be one!
-                        
-                    elif started_byte and bitcount == 6 and next_tone == SPACE_FREQ:
+                    elif bitcount == 5 and next_tone == SPACE_FREQ:
+                        last_tone = MARK_FREQ # ensure we treat a borderline as a space, since it probably will be one!    
+                    elif bitcount == 6 and next_tone == SPACE_FREQ:
                         self.in_data_buff.append(buffbyte)
                         started_byte = False
-                    else:
-                        print("I think this only happens when i mess up???")
-
+                    
+                    
+    def convert_dat_to_audio(self) -> bool:
+        ''' Translates the next data byte into an audio clip, and adds to the buffer. Will block if entire byte not written.'''
+        bitnum = 0
+        # start with the mark tone to wake things up?
+        expected_bytes = SAMPS_PER_BIT
+        actual_bytes = 0
+        while actual_bytes < expected_bytes:
+            actual_bytes += self.audio_out.write(MARK_TABLE[actual_bytes:])
+        # now do the start bit:
+        actual_bytes = 0
+        while actual_bytes < expected_bytes:
+            actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
+        
+        while bitnum < 5: # sending data (MAYBE BACKWARDS BIT ORDER!!!)
+            actual_bytes = 0
+            if (1<<bitnum) & self.out_data_buff[0]:
+                while actual_bytes < expected_bytes:
+                    actual_bytes += self.audio_out.write(MARK_TABLE[actual_bytes:])
+            else:
+                while actual_bytes < expected_bytes:
+                    actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
+            bitnum += 1
+        
+        # Stop bits, 2x space:
+        actual_bytes = 0
+        while actual_bytes < expected_bytes:
+            actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
+        actual_bytes = 0 
+        while actual_bytes < expected_bytes:
+            actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
             
+    def buff_character(self) -> int:
+        ''' Adds an ASCII character's baudot value to the out buffer, and returns it. '''
 
 
 
