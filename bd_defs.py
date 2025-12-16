@@ -6,6 +6,7 @@ BIT_LENGTH = 20 # bit length in ms. 20 = 50hz, 22 = 45.5
 INVALID_TONE = -1
 MARK_RATE = 2.8 # crossings per ms
 SPACE_RATE = 3.6 # crossings per ms
+BORDER_RATE = 3.2 # crossings per ms, this is where it's hard to tell exactly what freq it is?
 
 
 LTRS = (

@@ -10,6 +10,8 @@ MODE_CPU_RX = 1
 MODE_CPU_TX = 2
 MODE_TDD_RX = 3
 MODE_TDD_TX = 4
+curr_mode = -1 # boot mode
+
 
 AUDIO_MIDPOINT = 32768 # half of a full 16-bit int
 BIT_LENGTH = 20 # time in ms per bit. 20 for 50 baud, 22 for 45.5.
@@ -17,7 +19,7 @@ BIT_LENGTH = 20 # time in ms per bit. 20 for 50 baud, 22 for 45.5.
 
 
 
-curr_mode = -1 # boot mode
+
 
 class TDDInterface:
     def __init__(self, rx_clock, rx_word, rx_dat, tx_clock, tx_word, tx_dat, bit_length = 20):
