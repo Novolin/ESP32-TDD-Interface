@@ -1,4 +1,4 @@
-from machine import Pin, I2S # type:ignore (micropython lib)
+from machine import Pin, I2S, UART # type:ignore (micropython lib)
 from micropython import const #type:ignore 
 from collections import deque
 from bd_defs import *
@@ -46,7 +46,9 @@ class TDD_Interface:
         self.in_data_buff = deque([], 255)
         self.out_data_buff = deque([], 255)
         self.busy = False # are we busy decoding or encoding data? 
-        self.in_mode = LTRS
+        self.charset = LTRS # Assume LTRS by default.
+        self.last_assert = 0 # characters since mode last asserted
+    
     def decode_audio_buffer(self) -> int:
         ''' Decodes the incoming audio buffer, returns number of bytes decoded (?)'''
         last_tone = -1 # no previous tone at this point.
@@ -90,10 +92,10 @@ class TDD_Interface:
         return bytecount
             
                     
-    def convert_dat_to_audio(self) -> bool:
+    def play_next_byte(self):
         ''' Translates the next data byte into an audio clip, and adds to the buffer. Will block if entire byte not written.'''
         bitnum = 0
-        # start with the mark tone to wake things up?
+        # start with the mark tone
         expected_bytes = SAMPS_PER_BIT
         actual_bytes = 0
         while actual_bytes < expected_bytes:
@@ -121,17 +123,43 @@ class TDD_Interface:
         while actual_bytes < expected_bytes:
             actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
 
-        return False
             
-    def buff_character(self) -> int:
+    def buff_character(self, nextchar) -> int:
         ''' Adds an ASCII character's baudot value to the out buffer, and returns it. '''
+        if nextchar not in self.charset:
+            if nextchar in LTRS:
+                self.charset = LTRS
+                self.out_data_buff.append(0x1F)
+                self.last_assert = 0
+            elif nextchar in FIGS:
+                self.charset = FIGS
+                self.out_data_buff.append(0x1B)
+                self.last_assert = 0
+            else:
+                return -1 # invalid character!!
+        baud_val = self.charset.index(nextchar)
+        self.out_data_buff.append(baud_val)
+        self.last_assert += 1
+        return baud_val
 
-        return 0
+    def play_buffer(self) -> int:
+        ''' queues the audio data for the entire TX buffer to the i2s device. Will block other processes while active. 
+        Remember: 150ms of carrier tone before data begins!! Then 300ms after data!'''
+        bytes_out = 0
+        tone_pointer = 0
+        while bytes_out < BITRATE * 0.15:
+            tone_pointer += self.audio_out.write(MARK_TABLE[tone_pointer:])
+            bytes_out += tone_pointer
+            if tone_pointer >= SAMPS_PER_BIT:
+                tone_pointer = 0 # stop it from overflowing!
+        while len(self.out_data_buff) > 0:
+            self.play_next_byte()
+        
 
-            
-                
-
-
+class MPU_Interface:
+    ''' Class for interfacing with a W65C51N Serial Interface chip.'''
+    def __init__(self, uart_id:int, rts:int, cts:int, baudrate:int = 1200):
+        self.uart = UART(uart_id, baudrate = baudrate, )
 
 def count_crossings(data:bytearray) -> int:
     count = 0
