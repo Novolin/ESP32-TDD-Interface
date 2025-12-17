@@ -21,8 +21,8 @@ SAMPS_PER_BIT = const((BITRATE / 1000) * BIT_LENGTH)
 MARK_TABLE = bytearray()
 SPACE_TABLE = bytearray()
 for i in range(SAMPS_PER_BIT):
-    MARK_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * MARK_FREQ)))
-    SPACE_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * SPACE_FREQ)))
+    MARK_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * MARK_FREQ))).to_bytes(2, 'little')
+    SPACE_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * SPACE_FREQ))).to_bytes(2, 'little')
 
 
 
@@ -43,12 +43,12 @@ class TDD_Interface:
                              ibuf = BITRATE # 1 second should be more than enough for our output?
                              )
         self.in_audio_buff = bytearray()
-        self.in_data_buff = deque((), 255)
-        self.out_data_buff = deque((), 255)
+        self.in_data_buff = deque([], 255)
+        self.out_data_buff = deque([], 255)
         self.busy = False # are we busy decoding or encoding data? 
         self.in_mode = LTRS
     def decode_audio_buffer(self) -> int:
-        ''' Decodes the incoming audio buffer'''
+        ''' Decodes the incoming audio buffer, returns number of bytes decoded (?)'''
         last_tone = -1 # no previous tone at this point.
         # Trim until we hit the start of audio data:
         while True:
@@ -60,11 +60,12 @@ class TDD_Interface:
             self.in_audio_buff = self.in_audio_buff[2:] # snip until we get good data
         
         # Set up some counters for our next byte:
+        bytecount = 0 # number of bytes decoded
         buffbyte = 0
         bitcount = 0
         started_byte = False
         # Process our buffer until we no longer contain a full byte
-        while len(self.in_audio_buff) > SAMPS_PER_BIT * 8:
+        while len(self.in_audio_buff[bytecount * SAMPS_PER_BIT * 8:]) > SAMPS_PER_BIT * 8:
             next_tone = get_tone_value(self.in_audio_buff[SAMPS_PER_BIT * bitcount:SAMPS_PER_BIT * bitcount + 1 ], last_tone)
             if next_tone < 0:
                 last_tone = next_tone
@@ -85,7 +86,9 @@ class TDD_Interface:
                     elif bitcount == 6 and next_tone == SPACE_FREQ:
                         self.in_data_buff.append(buffbyte)
                         started_byte = False
-                    
+                        bytecount += 1
+        return bytecount
+            
                     
     def convert_dat_to_audio(self) -> bool:
         ''' Translates the next data byte into an audio clip, and adds to the buffer. Will block if entire byte not written.'''
@@ -117,11 +120,13 @@ class TDD_Interface:
         actual_bytes = 0 
         while actual_bytes < expected_bytes:
             actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
+
+        return False
             
     def buff_character(self) -> int:
         ''' Adds an ASCII character's baudot value to the out buffer, and returns it. '''
 
-
+        return 0
 
             
                 
@@ -130,7 +135,7 @@ class TDD_Interface:
 
 def count_crossings(data:bytearray) -> int:
     count = 0
-    firstbyte = int.frombytes(data[0:1], "little")
+    firstbyte = int.from_bytes(data[0:1], "little")
     data_size = len(data) # doing before the loop to avoid calling that every goddamn time
     if firstbyte > MIDPOINT:
         above = True
@@ -138,16 +143,16 @@ def count_crossings(data:bytearray) -> int:
         above = False
     i = 0
     while i < data_size:
-        if above & int.frombytes(data[i, i+1], "little") < MIDPOINT:
+        if above and  int.from_bytes(data[i: i+1], "little") < MIDPOINT:
             count += 1
             above = False
-        elif int.frombytes(data[i, i+1], "little") > MIDPOINT and not above:
+        elif int.from_bytes(data[i:i+1], "little") > MIDPOINT and not above:
             count += 1
             above = True
         i += 2
     return count
 
-def get_tone_value(data_slice:list, last_tone = -1) -> int:
+def get_tone_value(data_slice:bytearray, last_tone = -1) -> int:
     '''Returns the value of the data slice given as either mark, space or invalid'''
     crosses = count_crossings(data_slice)
     if crosses < (MARK_RATE * BIT_LENGTH) - 2: # not enough crossings! Sample a bit later on.
