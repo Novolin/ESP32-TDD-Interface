@@ -9,14 +9,44 @@ from math import cos, sin, pi
 from cmath import polar
 
 
-BITRATE = 11000 # 11kHz is a bit high, but more accurate.
-SAMPS_PER_BIT = BITRATE/BIT_LENGTH # should be 220 for 50 baud, ~240 for 45.5. Don't use 45.5 if you can avoid it.
+BITRATE = 11025 # 11kHz is a bit high, but more accurate.
 
-# Samples per cycle for each tone:
-SPC_MARK = BITRATE / MARK_FREQ
-SPC_SPACE = BITRATE/ SPACE_FREQ
+class goertz:
+    ''' A class to create an object you can use to target a specific frequency'''
+    def __init__(self, target_freq):
+        spc = BITRATE / target_freq 
+        omega = 2 * pi / spc
+        self.coeff = 2 * cos(omega)
+        self.fac = -cos(omega) + 1j * sin(omega)
+    
+    def calc(self, dbuffer):
+        ''' Calculates the magnitude of the frequency in the given # of samples'''
+        q0 = q1 = q2 = 0
+        for s in dbuffer:
+            q0 = self.coeff * q1 - q2 + s
+            q2 = q1
+            q1 = q0
+        return polar(q1 + q2 * self.fac)[0] / (len(dbuffer) / 2)
 
-# Omega values for each tone
-w_mark = (2 * pi )/ SPC_MARK
-w_space = (2* pi) / SPC_SPACE
 
+# TESTING TIME: ONLY USING THIS LIB BECAUSE I NEED IT TO DO THIS ON GITHUB AND NOT REAL H/W:
+
+# Generate some known good waves:
+SAMPS_PER_BIT = int((BITRATE / 1000) * BIT_LENGTH)
+MIDPOINT = 0
+MARK_TABLE = []
+SPACE_TABLE = []
+for i in range(SAMPS_PER_BIT):
+    MARK_TABLE.append(MIDPOINT + (2**14 * sin(2*pi * i * MARK_FREQ)))
+    SPACE_TABLE.append(MIDPOINT + (2**14 * sin(2 * pi * i * SPACE_FREQ)))
+
+test_1400 = goertz(1400)
+test_1800 = goertz(1800)
+
+mark_test = test_1400.calc(MARK_TABLE)
+mark_test_bad = test_1800.calc(MARK_TABLE)
+
+space_test_bad = test_1400.calc(SPACE_TABLE)
+space_test = test_1800.calc(SPACE_TABLE)
+
+print(f"Mark test: {mark_test} for 1400 Hz, {mark_test_bad} for 1800\nSpace Test: {space_test_bad} for 1400, {space_test} for 1800.")
