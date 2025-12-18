@@ -142,7 +142,7 @@ class TDD_Interface:
         self.last_assert += 1
         return baud_val
 
-    def play_buffer(self) -> int:
+    def play_buffer(self):
         ''' queues the audio data for the entire TX buffer to the i2s device. Will block other processes while active. 
         Remember: 150ms of carrier tone before data begins!! Then 300ms after data!'''
         bytes_out = 0
@@ -159,7 +159,8 @@ class TDD_Interface:
 class MPU_Interface:
     ''' Class for interfacing with a W65C51N Serial Interface chip.'''
     def __init__(self, uart_id:int, rts:int, cts:int, baudrate:int = 1200):
-        self.uart = UART(uart_id, baudrate = baudrate, )
+        self.uart = UART(uart_id, baudrate = baudrate, rts = Pin(rts), cts = Pin(cts), flow=UART.RTS|UART.CTS)
+
 
 def count_crossings(data:bytearray) -> int:
     count = 0
@@ -196,4 +197,3 @@ def get_tone_value(data_slice:bytearray, last_tone = -1) -> int:
             return MARK_FREQ
         else:
             return SPACE_FREQ # It's most likely an offset sample containing our space frequency.
-    
