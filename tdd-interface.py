@@ -2,7 +2,8 @@ from machine import Pin, I2S, UART # type:ignore (micropython lib)
 from micropython import const #type:ignore 
 from collections import deque
 from bd_defs import *
-from math import sin, tau
+from math import sin, cos, tau
+from cmath import polar
 
 
 
@@ -24,6 +25,23 @@ for i in range(SAMPS_PER_BIT):
     MARK_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * MARK_FREQ))).to_bytes(2, 'little')
     SPACE_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * SPACE_FREQ))).to_bytes(2, 'little')
 
+
+class Goertz:
+    ''' A class to create an object you can use to target a specific frequency'''
+    def __init__(self, target_freq):
+        spc = BITRATE / target_freq 
+        omega = tau / spc
+        self.coeff = 2.0 * cos(omega)
+        self.fac = -cos(omega) + 1j * sin(omega)
+    
+    def calc(self, dbuffer):
+        ''' Calculates the magnitude of the frequency in the given # of samples'''
+        q0 = q1 = q2 = 0
+        for s in dbuffer:
+            q0 = self.coeff * q1 - q2 + s
+            q2 = q1
+            q1 = q0
+        return polar(q1 + q2 * self.fac)[0] / (len(dbuffer) / 2)
 
 
 class TDD_Interface:
