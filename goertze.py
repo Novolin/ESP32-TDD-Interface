@@ -9,7 +9,7 @@ from math import cos, sin, pi
 from cmath import polar
 
 
-BITRATE = 11025 # 11kHz is a bit high, but more accurate.
+BITRATE = 11000 # 11kHz is a bit high, but more accurate.
 
 class goertz:
     ''' A class to create an object you can use to target a specific frequency'''
@@ -33,13 +33,18 @@ class goertz:
 
 # Generate some known good waves:
 SAMPS_PER_BIT = int((BITRATE / 1000) * BIT_LENGTH)
-MIDPOINT = 0
+MIDPOINT = 32768
 MARK_TABLE = []
 SPACE_TABLE = []
+dupes = 0
 for i in range(SAMPS_PER_BIT):
-    MARK_TABLE.append(MIDPOINT + (2**14 * sin(2*pi * i * MARK_FREQ)))
-    SPACE_TABLE.append(MIDPOINT + (2**14 * sin(2 * pi * i * SPACE_FREQ)))
+    MARK_TABLE.append(int(MIDPOINT + (MIDPOINT * cos(2 * pi  * i*MARK_FREQ))))
+    SPACE_TABLE.append(int(MIDPOINT + (MIDPOINT * sin(2 * pi * i *SPACE_FREQ))))
+    if MARK_TABLE[0] == MARK_TABLE[i]:
+        dupes += 1
 
+print(MARK_TABLE[0], SPACE_TABLE[1])
+print(dupes)
 test_1400 = goertz(1400)
 test_1800 = goertz(1800)
 
