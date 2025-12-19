@@ -9,12 +9,11 @@ from math import cos, sin, pi
 from cmath import polar
 
 
-BITRATE = 8000 # 8kHz actually works better than other sample rates!
 
 class goertz:
     ''' A class to create an object you can use to target a specific frequency'''
-    def __init__(self, target_freq):
-        spc = BITRATE / target_freq 
+    def __init__(self, target_freq, bitrate):
+        spc = bitrate / target_freq 
         omega = 2.0 * pi / spc
         self.coeff = 2.0 * cos(omega)
         self.fac = -cos(omega) + 1j * sin(omega)
