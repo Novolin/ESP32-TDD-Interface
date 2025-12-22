@@ -3,6 +3,7 @@ from micropython import const #type:ignore
 from collections import deque
 from bd_defs import *
 from math import sin, tau
+from array import array
 
 
 
@@ -18,11 +19,11 @@ SAMPS_PER_BIT = const((BITRATE / 1000) * BIT_LENGTH)
 # remember: I2S uses little-endian data!! 
 
 # Sine tables for output:
-MARK_TABLE = bytearray()
-SPACE_TABLE = bytearray()
+MARK_TABLE = array('H')
+SPACE_TABLE = array('H')
 for i in range(SAMPS_PER_BIT):
-    MARK_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * MARK_FREQ))).to_bytes(2, 'little')
-    SPACE_TABLE += int(MIDPOINT + (2**14 * sin(tau * i * SPACE_FREQ))).to_bytes(2, 'little')
+    MARK_TABLE.append(MIDPOINT + (2**14 * sin(tau * i * MARK_FREQ)))
+    SPACE_TABLE.append(MIDPOINT + (2**14 * sin(tau * i * SPACE_FREQ)))
 
 
 
@@ -42,7 +43,7 @@ class TDD_Interface:
                              rate = BITRATE,
                              ibuf = BITRATE # 1 second should be more than enough for our output?
                              )
-        self.in_audio_buff = bytearray()
+        self.in_audio_buff = array("H")
         self.in_data_buff = deque([], 255)
         self.out_data_buff = deque([], 255)
         self.busy = False # are we busy decoding or encoding data? 
@@ -56,7 +57,7 @@ class TDD_Interface:
         while True:
             if len(self.in_audio_buff) < 2:
                 return NOT_ENOUGH_DATA
-            sample = int.from_bytes(self.in_audio_buff[0:2], 'little')
+            sample = self.in_audio_buff[0:2]
             if sample > NOISEFLOOR + MIDPOINT or sample < MIDPOINT - NOISEFLOOR:
                 break
             self.in_audio_buff = self.in_audio_buff[2:] # snip until we get good data
@@ -158,13 +159,21 @@ class TDD_Interface:
 
 class MPU_Interface:
     ''' Class for interfacing with a W65C51N Serial Interface chip.'''
-    def __init__(self, uart_id:int, rts:int, cts:int, baudrate:int = 1200):
-        self.uart = UART(uart_id, baudrate = baudrate, rts = Pin(rts), cts = Pin(cts), flow=UART.RTS|UART.CTS)
+    def __init__(self, tdd_io:TDD_Interface, uart_id:int, rts:int|None = None, cts:int|None = None, baudrate:int = 1200):
+        self.uart = UART(uart_id, baudrate = baudrate)
+        if uart_id > 0:
+            self.uart.init(baudrate = baudrate)
+
+        else:
+            self.uart.init(baudrate = baudrate, cts = cts, rts = rts, flow = UART.RTS | UART.CTS) # '816 interface
+        self.tdd = tdd_io
 
 
-def count_crossings(data:bytearray) -> int:
+    
+
+def count_crossings(data:array) -> int:
     count = 0
-    firstbyte = int.from_bytes(data[0:1], "little")
+    firstbyte = data[0:1]
     data_size = len(data) # doing before the loop to avoid calling that every goddamn time
     if firstbyte > MIDPOINT:
         above = True
@@ -172,16 +181,16 @@ def count_crossings(data:bytearray) -> int:
         above = False
     i = 0
     while i < data_size:
-        if above and  int.from_bytes(data[i: i+1], "little") < MIDPOINT:
+        if above and data[i: i+1] < MIDPOINT:
             count += 1
             above = False
-        elif int.from_bytes(data[i:i+1], "little") > MIDPOINT and not above:
+        elif data[i:i+1] > MIDPOINT and not above:
             count += 1
             above = True
         i += 2
     return count
 
-def get_tone_value(data_slice:bytearray, last_tone = -1) -> int:
+def get_tone_value(data_slice:array, last_tone = -1) -> int:
     '''Returns the value of the data slice given as either mark, space or invalid'''
     crosses = count_crossings(data_slice)
     if crosses < (MARK_RATE * BIT_LENGTH) - 2: # not enough crossings! Sample a bit later on.
@@ -197,3 +206,5 @@ def get_tone_value(data_slice:bytearray, last_tone = -1) -> int:
             return MARK_FREQ
         else:
             return SPACE_FREQ # It's most likely an offset sample containing our space frequency.
+    
+def 
