@@ -3,6 +3,7 @@
 Blog
 datasheets
 __pycache__
+venv
 # Prerequisites
 *.d
 

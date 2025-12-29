@@ -4,10 +4,10 @@ from collections import deque
 from bd_defs import *
 from math import sin, tau
 from array import array
+import asyncio
 
 
-
-
+# consts
 NOT_ENOUGH_DATA = -1
 NO_AUDIO_FOUND = -2
 
@@ -28,6 +28,7 @@ for i in range(SAMPS_PER_BIT):
 
 
 class TDD_Interface:
+    '''Class for interfacing with a TDD via acoustic coupler. Doesn't act like a data stream, because uhhhh that's hard.'''
     def __init__(self, rx_clock, rx_word_sel, rx_data, tx_clock, tx_word_sel, tx_data):
         self.audio_in = I2S(0, sck = Pin(rx_clock), ws = Pin(rx_word_sel), sd = Pin(rx_data), 
                        mode = I2S.RX,
@@ -46,10 +47,12 @@ class TDD_Interface:
         self.in_audio_buff = array("H")
         self.in_data_buff = deque([], 255)
         self.out_data_buff = deque([], 255)
-        self.busy = False # are we busy decoding or encoding data? 
         self.charset = LTRS # Assume LTRS by default.
         self.last_assert = 0 # characters since mode last asserted
+        self.rts = False # Are we ready to send a data packet
+        self.cts = False # Are we aready to rx data from the TDD?
     
+
     def decode_audio_buffer(self) -> int:
         ''' Decodes the incoming audio buffer, returns number of bytes decoded (?)'''
         last_tone = -1 # no previous tone at this point.
@@ -96,6 +99,7 @@ class TDD_Interface:
     def play_next_byte(self):
         ''' Translates the next data byte into an audio clip, and adds to the buffer. Will block if entire byte not written.'''
         bitnum = 0
+        next_byte = self.out_data_buff.popleft()
         # start with the mark tone
         expected_bytes = SAMPS_PER_BIT
         actual_bytes = 0
@@ -108,7 +112,7 @@ class TDD_Interface:
         
         while bitnum < 5: # sending data (MAYBE BACKWARDS BIT ORDER!!!)
             actual_bytes = 0
-            if (1<<bitnum) & self.out_data_buff[0]:
+            if (1<<bitnum) & next_byte:
                 while actual_bytes < expected_bytes:
                     actual_bytes += self.audio_out.write(MARK_TABLE[actual_bytes:])
             else:
@@ -124,6 +128,7 @@ class TDD_Interface:
         while actual_bytes < expected_bytes:
             actual_bytes += self.audio_out.write(SPACE_TABLE[actual_bytes:])
 
+        
             
     def buff_character(self, nextchar) -> int:
         ''' Adds an ASCII character's baudot value to the out buffer, and returns it. '''
@@ -143,9 +148,8 @@ class TDD_Interface:
         self.last_assert += 1
         return baud_val
 
-    def play_buffer(self):
-        ''' queues the audio data for the entire TX buffer to the i2s device. Will block other processes while active. 
-        Remember: 150ms of carrier tone before data begins!! Then 300ms after data!'''
+    async def play_buffer(self):
+        ''' queues the audio data for the entire TX buffer to the i2s device. Will block for a full byte, but yield for other processes between bytes'''
         bytes_out = 0
         tone_pointer = 0
         while bytes_out < BITRATE * 0.15:
@@ -155,21 +159,54 @@ class TDD_Interface:
                 tone_pointer = 0 # stop it from overflowing!
         while len(self.out_data_buff) > 0:
             self.play_next_byte()
+            await asyncio.sleep(0) # see if anything else needs to run first
         
 
 class MPU_Interface:
     ''' Class for interfacing with a W65C51N Serial Interface chip.'''
-    def __init__(self, tdd_io:TDD_Interface, uart_id:int, rts:int|None = None, cts:int|None = None, baudrate:int = 1200):
+    def __init__(self, output_target: TDD_Interface|UART, uart_id:int, rts:int|None = None, cts:int|None = None, baudrate:int = 1200):
         self.uart = UART(uart_id, baudrate = baudrate)
-        if uart_id > 0:
-            self.uart.init(baudrate = baudrate)
+        self.uart.init(baudrate = baudrate, cts = cts, rts = rts, flow = UART.RTS | UART.CTS) # '816 interface
+        self.target = output_target
+        self.uart.irq(UART.IRQ_RX, self.buff_rx)
+        self.send_buff = array("B") # array of longer data that needs to go out on the TDD, in case it's beyond 255 chars.
+        self.rx_buff = array("B")
+        self.rts = False
+        self.cts = True
 
-        else:
-            self.uart.init(baudrate = baudrate, cts = cts, rts = rts, flow = UART.RTS | UART.CTS) # '816 interface
-        self.tdd = tdd_io
-
-
+    def parse_buffer(self):
+        if self.rx_buff[-1] == "\0": # MPU ends its string output
+            for c in self.rx_buff:
+                if c != "\0":
+                    self.target.buff_character(c)
+            self.rx_buff.clear()
+        return
+            
+    def buff_rx(self):
+        self.uart.readinto(self.rx_buff)
     
+    def send_data(self):
+        # sends the output buffer to the target device
+        for c in self.send_buff:
+            self.uart.write(c)
+        self.send_buff.clear()
+        return 
+
+    async def check_uart(self):
+        while True:
+            if self.cts and self.rts and len(self.send_buff) > 0:
+                self.send_data()
+            self.buff_rx()
+            self.parse_buffer()
+
+
+class USB_terminal:
+    def __init__(self) -> None:
+        self.in_buff = array("B") # unsigned, 8-bit only. It's just going to be ascii or utf-8.
+        self.out_buff = array("B")
+        self.uart = UART(0, baudrate = 9600) # will autoinit, we're good.
+    
+
 
 def count_crossings(data:array) -> int:
     count = 0
@@ -207,4 +244,7 @@ def get_tone_value(data_slice:array, last_tone = -1) -> int:
         else:
             return SPACE_FREQ # It's most likely an offset sample containing our space frequency.
     
-def 
+
+
+async def main():
+    pass
